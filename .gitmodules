@@ -1,3 +1,4 @@
 [submodule "doc_ocr_dataset"]
 	path = doc_ocr_dataset
-	url = https://github.com/pichiu/doc_ocr_dataset.git
+	url = https://github.com/ocisd4/doc_ocr_dataset.git
+	branch = main
