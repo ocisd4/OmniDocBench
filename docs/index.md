@@ -69,6 +69,14 @@ OmniDocBench 是一個專門設計用於評估文檔解析性能的基準測試�
   - 測試和故障排除
   - 性能優化和開發工作流程
 
+- **[OCR 多模型比較評估指南](./ocr-comparison-eval-guide.md)** 📊
+  - 系統架構與元件關係圖
+  - 配置說明與參數詳解
+  - 執行流程與序列圖
+  - 輸出報告格式解析（Markdown、JSON、錯誤分析）
+  - 指標說明（Edit_dist 子指標、TEDS）
+  - 使用範例與擴展指南
+
 ---
 
 ## 📂 現有項目文檔
@@ -201,6 +209,21 @@ cat result/end2end_quick_match_metric_result.json | jq .
 評估文字識別準確性。
 
 **支持的指標**：Edit Distance, BLEU, METEOR
+
+### 6. OCR 多模型比較評估
+
+**配置**：`configs/ocr_comparison.yaml`
+
+同時評估多個 OCR 模型，生成比較報告。
+
+**主要功能**：
+- 多模型同時評估
+- 按文件來源分類統計（paper、presentation、handwriting 等）
+- 自動生成 Markdown、JSON 及錯誤分析報告
+
+**支持的指標**：Edit Distance（含子指標）、TEDS
+
+**詳細文檔**：[OCR 多模型比較評估指南](./ocr-comparison-eval-guide.md)
 
 ---
 
@@ -445,6 +468,7 @@ OmniDocBench/
 
 *本文檔由 BMM document-project workflow 自動生成*
 *生成日期：2025-11-11*
+*最後更新：2025-01-27（新增 OCR 多模型比較評估指南）*
 *掃描模式：深度掃描*
 *項目類型：數據處理管道*
 
