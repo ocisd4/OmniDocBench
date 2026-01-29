@@ -117,6 +117,27 @@ class OCRReportGenerator:
         else:
             return f"{value:.4f}"
 
+    def _get_metric_value(
+        self, all_data: dict, metric_name: str, sub_metric: str | None = None
+    ) -> float | None:
+        """
+        從 End2EndEval 的 all 巢狀結構提取指標值
+
+        Args:
+            all_data: result_all[element]["all"]，如 {"Edit_dist": {"ALL_page_avg": x, ...}, "TEDS": {"all": a}}
+            metric_name: 指標名稱，如 "Edit_dist", "TEDS"
+            sub_metric: Edit_dist 子指標，如 "ALL_page_avg", "edit_whole"
+        """
+        metric_data = all_data.get(metric_name)
+        if metric_data is None:
+            return None
+        if not isinstance(metric_data, dict):
+            return metric_data
+        if sub_metric:
+            return metric_data.get(sub_metric)
+        # 非 Edit_dist 指標：取 "all" key
+        return metric_data.get("all")
+
     def _get_category_display_name(self, category: str) -> str:
         """取得分類的顯示名稱"""
         zh_name = self.CATEGORY_NAMES.get(category, category)
@@ -168,7 +189,7 @@ class OCRReportGenerator:
                 for model in self.models:
                     model_data = self.results.get(model, {})
                     element_data = model_data.get("elements", {}).get(element_type, {})
-                    sample_count = element_data.get("overall", {}).get("sample_count", 0)
+                    sample_count = element_data.get("sample_count", 0)
 
                     if gt_count > 0:
                         match_rate = sample_count / gt_count * 100
@@ -237,14 +258,17 @@ class OCRReportGenerator:
             for model in self.models:
                 model_data = self.results.get(model, {})
                 element_data = model_data.get("elements", {}).get(element_type, {})
-                overall = element_data.get("overall", {})
-
-                sample_count = overall.get("sample_count", 0)
+                all_data = element_data.get("all", {})
+                sample_count = element_data.get("sample_count", 0)
                 row = f"| {model} | {sample_count} |"
 
                 for metric in expanded_metrics:
-                    metric_value = overall.get(metric)
-                    # Edit_dist 子指標也使用準確率格式
+                    # 從 End2EndEval nested all 結構讀取指標
+                    if metric.startswith("Edit_dist_"):
+                        sub = metric.replace("Edit_dist_", "")
+                        metric_value = self._get_metric_value(all_data, "Edit_dist", sub)
+                    else:
+                        metric_value = self._get_metric_value(all_data, metric)
                     base_metric = "Edit_dist" if metric.startswith("Edit_dist") else metric
                     row += f" {self._format_metric_value(base_metric, metric_value)} |"
 
