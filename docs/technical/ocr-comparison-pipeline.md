@@ -284,8 +284,8 @@ def evaluate(self):
 
 `End2EndEval` 在計算指標後，自動呼叫這兩個函式產生分組統計：
 
-- **Annotation Attribute（`group`）**：按 GT 標註的屬性（如 `text_background`、`text_language`、`text_rotate`）分組統計指標值
-- **Page Attribute（`page`）**：按頁面屬性（如 `data_source`、`language`、`layout`）分組統計指標值，包含一個 `ALL` 全域平均
+- **Annotation Attribute（`group`）**：按 GT 標註的屬性（如 `text_background`、`text_language`、`text_rotate`）分組統計指標值，含 `sample_count`（各屬性的匹配樣本數，per-model）
+- **Page Attribute（`page`）**：按頁面屬性（如 `data_source`、`language`、`layout`）分組統計指標值，包含一個 `ALL` 全域平均，含 `sample_count`（各屬性對應的 GT 頁面數，由 `nunique()` 計算）
 
 ### 第 10 層：報告生成
 

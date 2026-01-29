@@ -319,11 +319,11 @@ python pdf_validation.py --config configs/ocr_comparison.yaml
 
 #### 4. 按 Annotation Attribute 分類統計
 
-依照 GT 標註的屬性（如 `text_background`、`text_language`、`text_rotate`）細分的指標值，含各屬性的樣本數量。
+依照 GT 標註的屬性（如 `text_background`、`text_language`、`text_rotate`）細分的指標值。各模型 cell 內嵌 `[n=X]` 標示該模型的匹配樣本數（因各模型匹配數可能不同）。
 
 #### 5. 按 Page Attribute 分類統計
 
-依照頁面屬性（如 `data_source`、`language`、`layout`）細分的指標值，`ALL` 列為全域平均。有助於了解模型在不同文件來源類型上的表現差異。
+依照頁面屬性（如 `data_source`、`language`、`layout`）細分的指標值，`ALL` 列為全域平均。含「頁數」欄，標示各屬性對應的 GT 頁面數（由 GT 決定，各模型相同）。有助於了解模型在不同文件來源類型上的表現差異。
 
 ### JSON 報告結構
 
