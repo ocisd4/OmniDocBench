@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from registry.registry import DATASET_REGISTRY, EVAL_TASK_REGISTRY, METRIC_REGISTRY
+from registry.registry import DATASET_REGISTRY, EVAL_TASK_REGISTRY
 from metrics.report_generator import OCRReportGenerator
 from task.end2end_run_eval import End2EndEval
 

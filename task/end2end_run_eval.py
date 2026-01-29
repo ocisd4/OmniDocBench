@@ -85,7 +85,7 @@ class End2EndEval():
                 find_non_serializable(saved_samples)
 
 
+        self.result_all = result_all
         with open(f'./result/{save_name}_metric_result.json', 'w', encoding='utf-8') as f:
             json.dump(result_all, f, indent=4, ensure_ascii=False)
-        self.result_all = result_all
     
