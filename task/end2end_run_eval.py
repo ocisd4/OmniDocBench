@@ -4,12 +4,12 @@ from metrics.show_result import show_result, get_full_labels_results, get_page_s
 from registry.registry import METRIC_REGISTRY
 import json
 import os
-import pdb
 
 @EVAL_TASK_REGISTRY.register("end2end_eval")
 class End2EndEval():
     def __init__(self, dataset, metrics_list, page_info_path, save_name):
         result_all = {}
+        self.evaluated_samples = {}
         page_info = {}
         if os.path.isdir(page_info_path):
             md_flag = True
@@ -47,7 +47,6 @@ class End2EndEval():
                 'all': result,
                 'group':  group_result,
                 'page': page_result}
-            # pdb.set_trace()
 
             if not os.path.exists('./result'):
                 os.makedirs('./result')
@@ -55,6 +54,7 @@ class End2EndEval():
                 saved_samples = samples
             else:
                 saved_samples = samples.samples
+            self.evaluated_samples[element] = saved_samples
             try:
 
                 with open(f'./result/{save_name}_{element}_result.json', 'w', encoding='utf-8') as f:
@@ -83,6 +83,7 @@ class End2EndEval():
                 find_non_serializable(saved_samples)
 
 
+        self.result_all = result_all
         with open(f'./result/{save_name}_metric_result.json', 'w', encoding='utf-8') as f:
             json.dump(result_all, f, indent=4, ensure_ascii=False)
     

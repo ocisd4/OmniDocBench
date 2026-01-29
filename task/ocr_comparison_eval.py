@@ -1,7 +1,7 @@
 """
 OCR 多模型比較評估任務
 
-此模組提供多模型 OCR 評估比較功能，使用現有的 End2EndDataset 和 Metric 架構，
+此模組提供多模型 OCR 評估比較功能，委派 End2EndEval 執行指標評估，
 並整合報告生成功能。
 """
 
@@ -9,11 +9,11 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
-from registry.registry import DATASET_REGISTRY, EVAL_TASK_REGISTRY, METRIC_REGISTRY
+from registry.registry import DATASET_REGISTRY, EVAL_TASK_REGISTRY
 from metrics.report_generator import OCRReportGenerator
-from metrics.show_result import get_data_source_summary
+from task.end2end_run_eval import End2EndEval
 
 
 @EVAL_TASK_REGISTRY.register("ocr_comparison_eval")
@@ -40,14 +40,14 @@ class OCRComparisonEval:
         self.metrics_config = config.get("metrics", {})
         self.output_config = config.get("output", {})
 
-        # 載入 page_info 用於 data_source 分類
+        # 載入 page_info 用於錯誤分析的 data_source 分類
         self.page_info = self._load_page_info()
 
         # 執行評估
         self.results = self.run()
 
     def _load_page_info(self) -> dict[str, dict]:
-        """載入頁面資訊，用於 data_source 分類"""
+        """載入頁面資訊，用於錯誤分析中的 data_source 分類"""
         page_info = {}
         with open(self.gt_path, "r", encoding="utf-8") as f:
             self._gt_pages = json.load(f)  # 保存以便後續計算 GT 統計
@@ -189,7 +189,7 @@ class OCRComparisonEval:
 
     def _evaluate_single_model(self, model: dict) -> tuple[dict[str, Any], dict]:
         """
-        評估單一模型
+        評估單一模型（委派給 End2EndEval）
 
         Args:
             model: 模型配置
@@ -201,100 +201,35 @@ class OCRComparisonEval:
         print(f"\n評估模型: {model_name}")
         print(f"預測結果目錄: {model['prediction_path']}")
 
-        # 構建配置並載入資料集
+        # 建立 dataset
         single_config = self._build_single_model_config(model)
         dataset = DATASET_REGISTRY.get("end2end_dataset")(single_config)
 
+        # 委派給 End2EndEval 執行指標評估
+        try:
+            eval_instance = End2EndEval(
+                dataset=dataset,
+                metrics_list=self.metrics_config,
+                page_info_path=self.gt_path,
+                save_name=model_name,
+            )
+        except Exception as e:
+            print(f"Error: End2EndEval failed for model {model_name} - {e}")
+            return {"elements": {}}, {}
+
+        # 直接使用 End2EndEval 的結果結構
         model_result = {"elements": {}}
-        evaluated_samples_dict = {}  # 保存評估後的樣本
-
-        # 對每個元素類型執行評估
-        for element_type, element_config in self.metrics_config.items():
-            metrics_list = element_config.get("metric", [])
-            if not metrics_list:
-                continue
-
-            # 取得該元素類型的樣本
-            samples = dataset.samples.get(element_type)
-            if samples is None:
-                print(f"  警告: 無法取得 {element_type} 樣本")
-                continue
-
-            # 取得樣本列表
-            if hasattr(samples, "samples"):
-                sample_list = samples.samples
-            else:
-                sample_list = samples
-
-            if not sample_list:
-                print(f"  警告: {element_type} 樣本為空")
-                continue
-
-            print(f"  評估 {element_type}: {len(sample_list)} 個樣本")
-
-            element_result = {"overall": {"sample_count": len(sample_list)}, "by_data_source": {}}
-
-            # 執行每個指標的評估
-            for metric_name in metrics_list:
-                try:
-                    metric_class = METRIC_REGISTRY.get(metric_name)
-                    save_name = f"{model_name}_{element_type}"
-                    evaluated_samples, metric_result = metric_class(sample_list).evaluate(
-                        group_info=[], save_name=save_name
-                    )
-
-                    # 更新樣本列表（某些指標會修改樣本）
-                    if hasattr(evaluated_samples, "samples"):
-                        sample_list = evaluated_samples.samples
-                    else:
-                        sample_list = evaluated_samples
-
-                    # 提取整體指標值
-                    if metric_result and metric_name in metric_result:
-                        metric_data = metric_result[metric_name]
-                        if isinstance(metric_data, dict):
-                            # Edit_dist 特殊處理：保存所有三個子指標
-                            if metric_name == "Edit_dist":
-                                # 保存所有子指標（ALL_page_avg, edit_whole, edit_sample_avg）
-                                for sub_metric, sub_value in metric_data.items():
-                                    if sub_value != "NaN":
-                                        element_result["overall"][f"{metric_name}_{sub_metric}"] = sub_value
-                                # 同時保存主指標（使用 edit_whole 作為主要值）
-                                if "edit_whole" in metric_data:
-                                    element_result["overall"][metric_name] = metric_data["edit_whole"]
-                            elif "all" in metric_data:
-                                element_result["overall"][metric_name] = metric_data["all"]
-                            elif "ALL_page_avg" in metric_data:
-                                element_result["overall"][metric_name] = metric_data["ALL_page_avg"]
-                            else:
-                                # 取第一個非 NaN 值
-                                for v in metric_data.values():
-                                    if v != "NaN":
-                                        element_result["overall"][metric_name] = v
-                                        break
-                        else:
-                            element_result["overall"][metric_name] = metric_data
-
-                except Exception as e:
-                    print(f"    警告: {metric_name} 評估失敗 - {e}")
-                    continue
-
-            # 計算按 data_source 分類的統計
-            by_data_source = get_data_source_summary(sample_list, self.page_info)
-            element_result["by_data_source"] = by_data_source
-
-            model_result["elements"][element_type] = element_result
-
-            # 保存評估後的樣本（包含 metric 資訊）
-            evaluated_samples_dict[element_type] = sample_list
-
-            # 輸出整體指標
-            overall_metrics = {
-                k: v for k, v in element_result["overall"].items() if k != "sample_count"
+        for element_type, element_data in eval_instance.result_all.items():
+            sample_list = eval_instance.evaluated_samples.get(element_type, [])
+            model_result["elements"][element_type] = {
+                "sample_count": len(sample_list),
+                "all": element_data.get("all", {}),
+                "group": element_data.get("group", {}),
+                "page": element_data.get("page", {}),
             }
-            print(f"    整體指標: {overall_metrics}")
+            print(f"  {element_type}: {len(sample_list)} 個樣本")
 
-        return model_result, evaluated_samples_dict
+        return model_result, eval_instance.evaluated_samples
 
     def run(self) -> dict[str, Any]:
         """

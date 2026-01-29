@@ -21,7 +21,7 @@ class OCRReportGenerator:
     報告內容由配置中的 metrics 設定動態決定。
     """
 
-    # data_source 分類順序
+    # data_source 分類順序（僅用於錯誤分析報告）
     CATEGORY_ORDER = [
         "paper",
         "presentation",
@@ -31,17 +31,6 @@ class OCRReportGenerator:
         "finance",
         "form",
     ]
-
-    # data_source 中英文名稱對照
-    CATEGORY_NAMES = {
-        "paper": "學術論文",
-        "presentation": "簡報投影片",
-        "handwriting": "手寫文件",
-        "receipt": "收據發票",
-        "eBook": "電子書",
-        "finance": "財務報表",
-        "form": "表格表單",
-    }
 
     # 指標說明
     METRIC_DESCRIPTIONS = {
@@ -75,8 +64,10 @@ class OCRReportGenerator:
                     "ModelName": {
                         "elements": {
                             "text_block": {
-                                "overall": {...},
-                                "by_data_source": {...}
+                                "sample_count": N,
+                                "all": {...},
+                                "group": {...},
+                                "page": {...}
                             }
                         }
                     }
@@ -105,22 +96,153 @@ class OCRReportGenerator:
         return sorted_cats
 
     def _format_metric_value(
-        self, metric_name: str, value: float, show_accuracy: bool = True
+        self,
+        metric_name: str,
+        value: float,
+        count: int | None = None,
+        show_accuracy: bool = True,
     ) -> str:
-        """格式化指標值"""
+        """格式化指標值
+
+        Args:
+            metric_name: 指標名稱
+            value: 指標值
+            count: 樣本數量，若提供則附加 [n=X]
+            show_accuracy: 是否顯示準確率（僅 Edit_dist）
+        """
         if value is None or value == "NaN":
             return "N/A"
 
         if metric_name == "Edit_dist" and show_accuracy:
             accuracy = 1.0 - value
-            return f"{value:.4f} ({accuracy*100:.2f}%)"
+            formatted = f"{value:.4f} ({accuracy*100:.2f}%)"
         else:
-            return f"{value:.4f}"
+            formatted = f"{value:.4f}"
 
-    def _get_category_display_name(self, category: str) -> str:
-        """取得分類的顯示名稱"""
-        zh_name = self.CATEGORY_NAMES.get(category, category)
-        return f"{zh_name} ({category})"
+        if count is not None:
+            formatted += f" [n={count}]"
+        return formatted
+
+    def _get_metric_value(
+        self, all_data: dict, metric_name: str, sub_metric: str | None = None
+    ) -> float | None:
+        """
+        從 End2EndEval 的 all 巢狀結構提取指標值
+
+        Args:
+            all_data: result_all[element]["all"]，如 {"Edit_dist": {"ALL_page_avg": x, ...}, "TEDS": {"all": a}}
+            metric_name: 指標名稱，如 "Edit_dist", "TEDS"
+            sub_metric: Edit_dist 子指標，如 "ALL_page_avg", "edit_whole"
+        """
+        metric_data = all_data.get(metric_name)
+        if metric_data is None:
+            return None
+        if not isinstance(metric_data, dict):
+            return metric_data
+        if sub_metric:
+            return metric_data.get(sub_metric)
+        # 非 Edit_dist 指標：取 "all" key
+        return metric_data.get("all")
+
+    def _generate_attribute_section(
+        self,
+        element_type: str,
+        metric: str,
+        data_key: str,
+        count_mode: str = "none",
+    ) -> list[str]:
+        """
+        生成屬性分類統計的表格
+
+        Args:
+            element_type: 元素類型（如 "text_block"）
+            metric: 指標名稱（如 "Edit_dist"）
+            data_key: 資料鍵名（"group" 或 "page"）
+            count_mode: 數量顯示模式
+                - "per_model": Annotation Attribute 用，[n=X] 嵌入每個 model cell
+                - "column": Page Attribute 用，單一「頁數」欄
+                - "none": 不顯示數量
+
+        Returns:
+            Markdown 行列表
+        """
+        lines: list[str] = []
+
+        # 收集所有屬性
+        all_attributes: set[str] = set()
+        for model in self.models:
+            model_data = self.results.get(model, {})
+            element_data = model_data.get("elements", {}).get(element_type, {})
+            section_data = element_data.get(data_key, {})
+            metric_attrs = section_data.get(metric, {})
+            all_attributes.update(metric_attrs.keys())
+
+        if not all_attributes:
+            lines.append("_無數據_")
+            lines.append("")
+            return lines
+
+        # 排序：page 的 ALL 排最前面
+        if data_key == "page":
+            sorted_attrs = []
+            if "ALL" in all_attributes:
+                sorted_attrs.append("ALL")
+            sorted_attrs.extend(sorted(a for a in all_attributes if a != "ALL"))
+        else:
+            sorted_attrs = sorted(all_attributes)
+
+        # 表頭
+        header = "| 屬性 |"
+        separator = "|------|"
+        if count_mode == "column":
+            header += " 頁數 |"
+            separator += "------|"
+        for model in self.models:
+            header += f" {model} |"
+            separator += "--------|"
+        lines.append(header)
+        lines.append(separator)
+
+        # 各屬性數據
+        for attr in sorted_attrs:
+            row = f"| {attr} |"
+
+            if count_mode == "column":
+                # 取第一個有資料的模型的頁數
+                page_count = 0
+                for model in self.models:
+                    model_data = self.results.get(model, {})
+                    element_data = model_data.get("elements", {}).get(
+                        element_type, {}
+                    )
+                    section_data = element_data.get(data_key, {})
+                    sample_counts = section_data.get("sample_count", {})
+                    if attr in sample_counts:
+                        page_count = sample_counts[attr]
+                        break
+                row += f" {page_count} |"
+
+            for model in self.models:
+                model_data = self.results.get(model, {})
+                element_data = model_data.get("elements", {}).get(
+                    element_type, {}
+                )
+                section_data = element_data.get(data_key, {})
+                value = section_data.get(metric, {}).get(attr)
+
+                # per_model 模式：取該模型自己的 sample_count 嵌入 cell
+                model_count = None
+                if count_mode == "per_model":
+                    sample_counts = section_data.get("sample_count", {})
+                    model_count = sample_counts.get(attr)
+
+                row += (
+                    f" {self._format_metric_value(metric, value, count=model_count)} |"
+                )
+            lines.append(row)
+
+        lines.append("")
+        return lines
 
     def _generate_dataset_overview(self) -> str:
         """
@@ -168,7 +290,7 @@ class OCRReportGenerator:
                 for model in self.models:
                     model_data = self.results.get(model, {})
                     element_data = model_data.get("elements", {}).get(element_type, {})
-                    sample_count = element_data.get("overall", {}).get("sample_count", 0)
+                    sample_count = element_data.get("sample_count", 0)
 
                     if gt_count > 0:
                         match_rate = sample_count / gt_count * 100
@@ -237,14 +359,17 @@ class OCRReportGenerator:
             for model in self.models:
                 model_data = self.results.get(model, {})
                 element_data = model_data.get("elements", {}).get(element_type, {})
-                overall = element_data.get("overall", {})
-
-                sample_count = overall.get("sample_count", 0)
+                all_data = element_data.get("all", {})
+                sample_count = element_data.get("sample_count", 0)
                 row = f"| {model} | {sample_count} |"
 
                 for metric in expanded_metrics:
-                    metric_value = overall.get(metric)
-                    # Edit_dist 子指標也使用準確率格式
+                    # 從 End2EndEval nested all 結構讀取指標
+                    if metric.startswith("Edit_dist_"):
+                        sub = metric.replace("Edit_dist_", "")
+                        metric_value = self._get_metric_value(all_data, "Edit_dist", sub)
+                    else:
+                        metric_value = self._get_metric_value(all_data, metric)
                     base_metric = "Edit_dist" if metric.startswith("Edit_dist") else metric
                     row += f" {self._format_metric_value(base_metric, metric_value)} |"
 
@@ -252,78 +377,35 @@ class OCRReportGenerator:
 
             lines.append("")
 
-        # 按 data_source 分類統計
-        lines.append("## 按 data_source 分類統計")
+        # 按 Annotation Attribute 分類統計
+        lines.append("## 按 Annotation Attribute 分類統計")
         lines.append("")
 
         for element_type, element_config in self.metrics_config.items():
             metrics = element_config.get("metric", [])
-            if not metrics:
-                continue
-
             for metric in metrics:
-                lines.append(f"### {element_type} - {metric}")
+                lines.append(f"### {element_type} - {metric} (Annotation Attribute)")
                 lines.append("")
+                lines.extend(
+                    self._generate_attribute_section(
+                        element_type, metric, "group", count_mode="per_model"
+                    )
+                )
 
-                # 收集所有分類
-                all_categories = set()
-                for model in self.models:
-                    model_data = self.results.get(model, {})
-                    element_data = model_data.get("elements", {}).get(element_type, {})
-                    by_ds = element_data.get("by_data_source", {})
-                    all_categories.update(by_ds.keys())
+        # 按 Page Attribute 分類統計
+        lines.append("## 按 Page Attribute 分類統計")
+        lines.append("")
 
-                if not all_categories:
-                    lines.append("_無數據_")
-                    lines.append("")
-                    continue
-
-                sorted_categories = self._get_sorted_categories(all_categories)
-
-                # 表頭
-                header = "| 分類 | 數量 |"
-                separator = "|------|------|"
-                for model in self.models:
-                    header += f" {model} |"
-                    separator += "--------|"
-
-                lines.append(header)
-                lines.append(separator)
-
-                # 各分類數據
-                for category in sorted_categories:
-                    cat_display = self._get_category_display_name(category)
-
-                    # 取得數量（從第一個有此分類的模型）
-                    count = 0
-                    for model in self.models:
-                        model_data = self.results.get(model, {})
-                        element_data = model_data.get("elements", {}).get(
-                            element_type, {}
-                        )
-                        by_ds = element_data.get("by_data_source", {})
-                        if category in by_ds:
-                            count = by_ds[category].get("count", 0)
-                            break
-
-                    row = f"| {cat_display} | {count} |"
-
-                    for model in self.models:
-                        model_data = self.results.get(model, {})
-                        element_data = model_data.get("elements", {}).get(
-                            element_type, {}
-                        )
-                        by_ds = element_data.get("by_data_source", {})
-                        cat_data = by_ds.get(category, {})
-                        metrics_data = cat_data.get("metrics", {})
-                        metric_info = metrics_data.get(metric, {})
-                        value = metric_info.get("value")
-
-                        row += f" {self._format_metric_value(metric, value)} |"
-
-                    lines.append(row)
-
+        for element_type, element_config in self.metrics_config.items():
+            metrics = element_config.get("metric", [])
+            for metric in metrics:
+                lines.append(f"### {element_type} - {metric} (Page Attribute)")
                 lines.append("")
+                lines.extend(
+                    self._generate_attribute_section(
+                        element_type, metric, "page", count_mode="column"
+                    )
+                )
 
         # 指標說明
         lines.append("## 指標說明")
@@ -393,7 +475,7 @@ class OCRReportGenerator:
             for model in self.models:
                 model_data = self.results.get(model, {})
                 element_data = model_data.get("elements", {}).get(element_type, {})
-                sample_count = element_data.get("overall", {}).get("sample_count", 0)
+                sample_count = element_data.get("sample_count", 0)
 
                 # 計算錯誤統計
                 model_errors = self.errors_data.get(model, {}).get(element_type, {})
