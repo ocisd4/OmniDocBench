@@ -96,17 +96,32 @@ class OCRReportGenerator:
         return sorted_cats
 
     def _format_metric_value(
-        self, metric_name: str, value: float, show_accuracy: bool = True
+        self,
+        metric_name: str,
+        value: float,
+        count: int | None = None,
+        show_accuracy: bool = True,
     ) -> str:
-        """格式化指標值"""
+        """格式化指標值
+
+        Args:
+            metric_name: 指標名稱
+            value: 指標值
+            count: 樣本數量，若提供則附加 [n=X]
+            show_accuracy: 是否顯示準確率（僅 Edit_dist）
+        """
         if value is None or value == "NaN":
             return "N/A"
 
         if metric_name == "Edit_dist" and show_accuracy:
             accuracy = 1.0 - value
-            return f"{value:.4f} ({accuracy*100:.2f}%)"
+            formatted = f"{value:.4f} ({accuracy*100:.2f}%)"
         else:
-            return f"{value:.4f}"
+            formatted = f"{value:.4f}"
+
+        if count is not None:
+            formatted += f" [n={count}]"
+        return formatted
 
     def _get_metric_value(
         self, all_data: dict, metric_name: str, sub_metric: str | None = None
@@ -134,7 +149,7 @@ class OCRReportGenerator:
         element_type: str,
         metric: str,
         data_key: str,
-        include_count: bool = False,
+        count_mode: str = "none",
     ) -> list[str]:
         """
         生成屬性分類統計的表格
@@ -143,7 +158,10 @@ class OCRReportGenerator:
             element_type: 元素類型（如 "text_block"）
             metric: 指標名稱（如 "Edit_dist"）
             data_key: 資料鍵名（"group" 或 "page"）
-            include_count: 是否包含數量欄（group 有，page 無）
+            count_mode: 數量顯示模式
+                - "per_model": Annotation Attribute 用，[n=X] 嵌入每個 model cell
+                - "column": Page Attribute 用，單一「頁數」欄
+                - "none": 不顯示數量
 
         Returns:
             Markdown 行列表
@@ -176,8 +194,8 @@ class OCRReportGenerator:
         # 表頭
         header = "| 屬性 |"
         separator = "|------|"
-        if include_count:
-            header += " 數量 |"
+        if count_mode == "column":
+            header += " 頁數 |"
             separator += "------|"
         for model in self.models:
             header += f" {model} |"
@@ -189,8 +207,9 @@ class OCRReportGenerator:
         for attr in sorted_attrs:
             row = f"| {attr} |"
 
-            if include_count:
-                count = 0
+            if count_mode == "column":
+                # 取第一個有資料的模型的頁數
+                page_count = 0
                 for model in self.models:
                     model_data = self.results.get(model, {})
                     element_data = model_data.get("elements", {}).get(
@@ -199,9 +218,9 @@ class OCRReportGenerator:
                     section_data = element_data.get(data_key, {})
                     sample_counts = section_data.get("sample_count", {})
                     if attr in sample_counts:
-                        count = sample_counts[attr]
+                        page_count = sample_counts[attr]
                         break
-                row += f" {count} |"
+                row += f" {page_count} |"
 
             for model in self.models:
                 model_data = self.results.get(model, {})
@@ -210,7 +229,16 @@ class OCRReportGenerator:
                 )
                 section_data = element_data.get(data_key, {})
                 value = section_data.get(metric, {}).get(attr)
-                row += f" {self._format_metric_value(metric, value)} |"
+
+                # per_model 模式：取該模型自己的 sample_count 嵌入 cell
+                model_count = None
+                if count_mode == "per_model":
+                    sample_counts = section_data.get("sample_count", {})
+                    model_count = sample_counts.get(attr)
+
+                row += (
+                    f" {self._format_metric_value(metric, value, count=model_count)} |"
+                )
             lines.append(row)
 
         lines.append("")
@@ -360,7 +388,7 @@ class OCRReportGenerator:
                 lines.append("")
                 lines.extend(
                     self._generate_attribute_section(
-                        element_type, metric, "group", include_count=True
+                        element_type, metric, "group", count_mode="per_model"
                     )
                 )
 
@@ -374,7 +402,9 @@ class OCRReportGenerator:
                 lines.append(f"### {element_type} - {metric} (Page Attribute)")
                 lines.append("")
                 lines.extend(
-                    self._generate_attribute_section(element_type, metric, "page")
+                    self._generate_attribute_section(
+                        element_type, metric, "page", count_mode="column"
+                    )
                 )
 
         # 指標說明

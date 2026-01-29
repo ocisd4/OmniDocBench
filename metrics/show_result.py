@@ -137,6 +137,15 @@ def get_page_split(samples, page_info):   # Page level metric
         page_avg = df.groupby(["image_name", "attribute"]).apply(lambda x: x["score"].mean()).groupby('attribute').mean() # 页面内部平均以后，再页面间的平均
         result[metric] = page_avg.to_dict()
 
+    # 計算每個 attribute 的唯一頁面數（頁數）
+    # 從任一 metric 的 DataFrame 取得，因頁面集合與 metric 無關
+    first_metric = next(iter(result_list), None)
+    if first_metric is not None:
+        df = pd.DataFrame(result_list[first_metric])
+        result["sample_count"] = (
+            df.groupby("attribute")["image_name"].nunique().to_dict()
+        )
+
     result = sort_nested_dict(result)
     # print('----Page Attribute---------------')
     show_result(result)
