@@ -75,8 +75,10 @@ class OCRReportGenerator:
                     "ModelName": {
                         "elements": {
                             "text_block": {
-                                "overall": {...},
-                                "by_data_source": {...}
+                                "sample_count": N,
+                                "all": {...},
+                                "group": {...},
+                                "page": {...}
                             }
                         }
                     }
@@ -467,7 +469,7 @@ class OCRReportGenerator:
             for model in self.models:
                 model_data = self.results.get(model, {})
                 element_data = model_data.get("elements", {}).get(element_type, {})
-                sample_count = element_data.get("overall", {}).get("sample_count", 0)
+                sample_count = element_data.get("sample_count", 0)
 
                 # 計算錯誤統計
                 model_errors = self.errors_data.get(model, {}).get(element_type, {})
