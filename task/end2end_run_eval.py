@@ -4,7 +4,6 @@ from metrics.show_result import show_result, get_full_labels_results, get_page_s
 from registry.registry import METRIC_REGISTRY
 import json
 import os
-import pdb
 
 @EVAL_TASK_REGISTRY.register("end2end_eval")
 class End2EndEval():
@@ -48,7 +47,6 @@ class End2EndEval():
                 'all': result,
                 'group':  group_result,
                 'page': page_result}
-            # pdb.set_trace()
 
             if not os.path.exists('./result'):
                 os.makedirs('./result')

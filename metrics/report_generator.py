@@ -21,7 +21,7 @@ class OCRReportGenerator:
     報告內容由配置中的 metrics 設定動態決定。
     """
 
-    # data_source 分類順序
+    # data_source 分類順序（僅用於錯誤分析報告）
     CATEGORY_ORDER = [
         "paper",
         "presentation",
@@ -31,17 +31,6 @@ class OCRReportGenerator:
         "finance",
         "form",
     ]
-
-    # data_source 中英文名稱對照
-    CATEGORY_NAMES = {
-        "paper": "學術論文",
-        "presentation": "簡報投影片",
-        "handwriting": "手寫文件",
-        "receipt": "收據發票",
-        "eBook": "電子書",
-        "finance": "財務報表",
-        "form": "表格表單",
-    }
 
     # 指標說明
     METRIC_DESCRIPTIONS = {
@@ -226,11 +215,6 @@ class OCRReportGenerator:
 
         lines.append("")
         return lines
-
-    def _get_category_display_name(self, category: str) -> str:
-        """取得分類的顯示名稱"""
-        zh_name = self.CATEGORY_NAMES.get(category, category)
-        return f"{zh_name} ({category})"
 
     def _generate_dataset_overview(self) -> str:
         """

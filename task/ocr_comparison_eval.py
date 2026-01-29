@@ -1,7 +1,7 @@
 """
 OCR 多模型比較評估任務
 
-此模組提供多模型 OCR 評估比較功能，使用現有的 End2EndDataset 和 Metric 架構，
+此模組提供多模型 OCR 評估比較功能，委派 End2EndEval 執行指標評估，
 並整合報告生成功能。
 """
 
@@ -40,14 +40,14 @@ class OCRComparisonEval:
         self.metrics_config = config.get("metrics", {})
         self.output_config = config.get("output", {})
 
-        # 載入 page_info 用於 data_source 分類
+        # 載入 page_info 用於錯誤分析的 data_source 分類
         self.page_info = self._load_page_info()
 
         # 執行評估
         self.results = self.run()
 
     def _load_page_info(self) -> dict[str, dict]:
-        """載入頁面資訊，用於 data_source 分類"""
+        """載入頁面資訊，用於錯誤分析中的 data_source 分類"""
         page_info = {}
         with open(self.gt_path, "r", encoding="utf-8") as f:
             self._gt_pages = json.load(f)  # 保存以便後續計算 GT 統計
