@@ -10,6 +10,7 @@ import pdb
 class End2EndEval():
     def __init__(self, dataset, metrics_list, page_info_path, save_name):
         result_all = {}
+        self.evaluated_samples = {}
         page_info = {}
         if os.path.isdir(page_info_path):
             md_flag = True
@@ -55,6 +56,7 @@ class End2EndEval():
                 saved_samples = samples
             else:
                 saved_samples = samples.samples
+            self.evaluated_samples[element] = saved_samples
             try:
 
                 with open(f'./result/{save_name}_{element}_result.json', 'w', encoding='utf-8') as f:
@@ -85,4 +87,5 @@ class End2EndEval():
 
         with open(f'./result/{save_name}_metric_result.json', 'w', encoding='utf-8') as f:
             json.dump(result_all, f, indent=4, ensure_ascii=False)
+        self.result_all = result_all
     
