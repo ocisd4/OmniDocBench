@@ -206,12 +206,16 @@ class OCRComparisonEval:
         dataset = DATASET_REGISTRY.get("end2end_dataset")(single_config)
 
         # 委派給 End2EndEval 執行指標評估
-        eval_instance = End2EndEval(
-            dataset=dataset,
-            metrics_list=self.metrics_config,
-            page_info_path=self.gt_path,
-            save_name=model_name,
-        )
+        try:
+            eval_instance = End2EndEval(
+                dataset=dataset,
+                metrics_list=self.metrics_config,
+                page_info_path=self.gt_path,
+                save_name=model_name,
+            )
+        except Exception as e:
+            print(f"Error: End2EndEval failed for model {model_name} - {e}")
+            return {"elements": {}}, {}
 
         # 直接使用 End2EndEval 的結果結構
         model_result = {"elements": {}}
