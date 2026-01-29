@@ -32,9 +32,8 @@ flowchart TD
     E --> G
     F --> G
     G --> H["匹配結果\n(4 組元素類型)"]
-    H --> I["指標計算\n(metrics/cal_metric.py)"]
-    I --> J["data_source 統計\n(metrics/show_result.py)"]
-    J --> K["報告生成\n(metrics/report_generator.py)"]
+    H --> I["End2EndEval\n(task/end2end_run_eval.py)\n指標計算 + 分組統計"]
+    I --> K["報告生成\n(metrics/report_generator.py)"]
     K --> L["輸出報告\n(.md / .json)"]
 ```
 
@@ -97,9 +96,9 @@ def run(self):
 ### 第 4 層：單模型評估
 
 **檔案**：`task/ocr_comparison_eval.py`
-**函式**：`_evaluate_single_model()` — 第 190-297 行
+**函式**：`_evaluate_single_model()` — 第 190-228 行
 
-此函式包含三個關鍵步驟：
+此函式委派 `End2EndEval` 執行指標計算與分組統計：
 
 ```python
 def _evaluate_single_model(self, model):
@@ -107,18 +106,25 @@ def _evaluate_single_model(self, model):
     single_config = self._build_single_model_config(model)
     dataset = DATASET_REGISTRY.get("end2end_dataset")(single_config)
 
-    # 步驟 2：對每個元素類型執行指標計算
-    for element_type, element_config in self.metrics_config.items():
-        samples = dataset.samples.get(element_type)
-        for metric_name in metrics_list:
-            metric_class = METRIC_REGISTRY.get(metric_name)
-            evaluated_samples, metric_result = metric_class(sample_list).evaluate()
+    # 步驟 2：委派給 End2EndEval 執行指標評估
+    eval_instance = End2EndEval(
+        dataset=dataset,
+        metrics_list=self.metrics_config,
+        page_info_path=self.gt_path,
+        save_name=model_name,
+    )
 
-    # 步驟 3：按 data_source 分類統計
-    by_data_source = get_data_source_summary(sample_list, self.page_info)
+    # 步驟 3：讀取 End2EndEval 的結果結構（all / group / page）
+    for element_type, element_data in eval_instance.result_all.items():
+        model_result["elements"][element_type] = {
+            "sample_count": len(sample_list),
+            "all": element_data.get("all", {}),
+            "group": element_data.get("group", {}),
+            "page": element_data.get("page", {}),
+        }
 ```
 
-其中 `element_type` 遍歷的是配置中定義的四種元素類型：`text_block`、`display_formula`、`table`、`reading_order`。
+`End2EndEval` 內部為每個元素類型（`text_block`、`display_formula`、`table`、`reading_order`）執行指標計算，並透過 `get_full_labels_results()` 和 `get_page_split()` 產生 Annotation Attribute（`group`）和 Page Attribute（`page`）分組統計。
 
 ### 第 5 層：資料集載入與元素匹配
 
@@ -271,12 +277,15 @@ def evaluate(self):
     return {'TEDS': {'all': mean(scores)}}
 ```
 
-### 第 9 層：data\_source 分類統計
+### 第 9 層：分組統計
 
 **檔案**：`metrics/show_result.py`
-**函式**：`get_data_source_summary()` — 第 146-246 行
+**函式**：`get_full_labels_results()` — Annotation Attribute 分組、`get_page_split()` — Page Attribute 分組
 
-將評估後的樣本按 `data_source`（paper、presentation、handwriting 等）分組，並計算各組的指標統計值。
+`End2EndEval` 在計算指標後，自動呼叫這兩個函式產生分組統計：
+
+- **Annotation Attribute（`group`）**：按 GT 標註的屬性（如 `text_background`、`text_language`、`text_rotate`）分組統計指標值
+- **Page Attribute（`page`）**：按頁面屬性（如 `data_source`、`language`、`layout`）分組統計指標值，包含一個 `ALL` 全域平均
 
 ### 第 10 層：報告生成
 
@@ -451,7 +460,7 @@ flowchart TD
     end
 
     subgraph "第 9-10 層：統計與報告"
-        G["get_data_source_summary()\n按文件來源分類"]
+        G["End2EndEval\ngroup / page 分組統計"]
         H["OCRReportGenerator\n生成 .md / .json"]
     end
 
@@ -504,7 +513,8 @@ flowchart TD
 | 簡單匹配 | `utils/match.py` | `match_gt2pred_simple()`, `compute_edit_distance_matrix_new()` |
 | Edit Distance | `metrics/cal_metric.py:139-184` | `call_Edit_dist.evaluate()` |
 | TEDS | `metrics/cal_metric.py:36-96` | `call_TEDS.evaluate()` |
-| data\_source 統計 | `metrics/show_result.py:146-246` | `get_data_source_summary()` |
+| 分組統計 | `metrics/show_result.py` | `get_full_labels_results()`、`get_page_split()` |
+| 指標評估委派 | `task/end2end_run_eval.py` | `End2EndEval.__init__()` |
 | 報告生成 | `metrics/report_generator.py` | `OCRReportGenerator.generate_markdown()`, `generate_json()` |
 | Registry 定義 | `registry/registry.py` | `EVAL_TASK_REGISTRY`, `METRIC_REGISTRY`, `DATASET_REGISTRY` |
 

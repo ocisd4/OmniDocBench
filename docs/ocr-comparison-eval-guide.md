@@ -115,8 +115,14 @@ classDiagram
         +register(name) decorator
     }
 
-    OCRComparisonEval --> End2EndDataset : 使用
-    OCRComparisonEval --> MetricRegistry : 查詢
+    class End2EndEval {
+        +result_all: dict
+        +evaluated_samples: dict
+    }
+
+    OCRComparisonEval --> End2EndDataset : 建立資料集
+    OCRComparisonEval --> End2EndEval : 委派評估
+    End2EndEval --> MetricRegistry : 查詢指標
     OCRComparisonEval --> OCRReportGenerator : 生成報告
 ```
 
@@ -133,7 +139,7 @@ classDiagram
 | 方法 | 說明 |
 |------|------|
 | `__init__(config)` | 初始化配置並執行評估 |
-| `_load_page_info()` | 載入頁面資訊供 `data_source` 分類 |
+| `_load_page_info()` | 載入頁面資訊供錯誤分析的 `data_source` 分類 |
 | `_get_gt_statistics()` | 計算 Ground Truth 元素統計 |
 | `_evaluate_single_model(model)` | 評估單一模型 |
 | `_collect_errors(samples_dict)` | 收集錯誤項目 |
@@ -159,21 +165,18 @@ classDiagram
    - 詳細錯誤項目清單
    - 包含 GT 文本、預測文本、錯誤類型
 
-### get_data_source_summary（分類統計函數）
+### End2EndEval（指標評估委派）
 
-**檔案位置**：`metrics/show_result.py`
+**檔案位置**：`task/end2end_run_eval.py`
 
-依照文件來源分類計算統計結果，支援的分類包括：
+`OCRComparisonEval` 將指標計算和分組統計委派給 `End2EndEval`，透過其兩個公開屬性取得結果：
 
-| 分類 ID | 中文名稱 | 說明 |
-|---------|----------|------|
-| `paper` | 學術論文 | 學術研究論文 |
-| `presentation` | 簡報投影片 | PowerPoint 等簡報 |
-| `handwriting` | 手寫文件 | 手寫筆記、手稿 |
-| `receipt` | 收據發票 | 購物收據、發票 |
-| `eBook` | 電子書 | 電子書籍內容 |
-| `finance` | 財務報表 | 財務報告、會計文件 |
-| `form` | 表格表單 | 申請表格等 |
+| 屬性 | 說明 |
+|------|------|
+| `result_all` | 各元素類型的評估結果，格式為 `{element_type: {"all": {...}, "group": {...}, "page": {...}}}` |
+| `evaluated_samples` | 各元素類型評估後的樣本列表，格式為 `{element_type: list[dict]}` |
+
+`End2EndEval` 內部使用 `get_full_labels_results()` 產生 Annotation Attribute 分組（`group`），使用 `get_page_split()` 產生 Page Attribute 分組（`page`，包含按 `data_source`、`language`、`layout` 等頁面屬性細分的指標值）。
 
 ## 配置說明
 
@@ -246,7 +249,7 @@ sequenceDiagram
     participant Main as pdf_validation.py
     participant Task as OCRComparisonEval
     participant DS as End2EndDataset
-    participant Metric as Metric Registry
+    participant E2E as End2EndEval
     participant Report as OCRReportGenerator
 
     User->>Main: python pdf_validation.py --config ocr_comparison.yaml
@@ -259,12 +262,10 @@ sequenceDiagram
         DS->>DS: 執行樣本匹配
         DS-->>Task: 返回匹配後的樣本
 
-        loop 對每個元素類型
-            Task->>Metric: 取得指標類別
-            Metric-->>Task: 返回指標實例
-            Task->>Task: 計算指標值
-            Task->>Task: 收集錯誤項目
-        end
+        Task->>E2E: 委派 End2EndEval(dataset, metrics, ...)
+        E2E->>E2E: 指標計算 + group/page 分組統計
+        E2E-->>Task: 返回 result_all + evaluated_samples
+        Task->>Task: 收集錯誤項目
     end
 
     Task->>Report: 初始化 OCRReportGenerator
@@ -316,9 +317,13 @@ python pdf_validation.py --config configs/ocr_comparison.yaml
 - `edit_whole`：整體編輯距離（所有字元合併計算）
 - `edit_sample_avg`：樣本層級平均編輯距離
 
-#### 4. 按 data_source 分類統計
+#### 4. 按 Annotation Attribute 分類統計
 
-依照文件來源類型細分的指標值，有助於了解模型在不同類型文件上的表現差異。
+依照 GT 標註的屬性（如 `text_background`、`text_language`、`text_rotate`）細分的指標值，含各屬性的樣本數量。
+
+#### 5. 按 Page Attribute 分類統計
+
+依照頁面屬性（如 `data_source`、`language`、`layout`）細分的指標值，`ALL` 列為全域平均。有助於了解模型在不同文件來源類型上的表現差異。
 
 ### JSON 報告結構
 
@@ -347,8 +352,10 @@ python pdf_validation.py --config configs/ocr_comparison.yaml
     "PaddleOCR": {
       "elements": {
         "text_block": {
-          "overall": { ... },
-          "by_data_source": { ... }
+          "sample_count": 1291,
+          "all": { "Edit_dist": { "ALL_page_avg": 0.1323, "edit_whole": 0.1552, "edit_sample_avg": 0.1310 } },
+          "group": { "Edit_dist": { "text_background: white": 0.131 }, "sample_count": { "text_background: white": 1291 } },
+          "page": { "Edit_dist": { "ALL": 0.1323, "data_source: paper": 0.0608 } }
         }
       }
     }
@@ -553,7 +560,7 @@ class MyMetric:
 
 ### 新增文件來源分類
 
-修改 `metrics/report_generator.py` 中的分類設定：
+Annotation Attribute 和 Page Attribute 統計會自動從 GT 資料中提取所有屬性鍵，無需手動新增分類。若需要在**錯誤分析報告**中自訂分類排序，修改 `metrics/report_generator.py` 中的 `CATEGORY_ORDER`：
 
 ```python
 CATEGORY_ORDER = [
@@ -566,11 +573,6 @@ CATEGORY_ORDER = [
     "form",
     "my_new_category",  # 新增分類
 ]
-
-CATEGORY_NAMES = {
-    # ...existing...
-    "my_new_category": "我的新分類",
-}
 ```
 
 ### 自訂報告格式
